@@ -4,7 +4,7 @@ import pandas as pd
 from PIL import Image
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 import lightning.pytorch as pl
 
