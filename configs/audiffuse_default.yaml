@@ -1,0 +1,19 @@
+# lightning.pytorch==2.0.6
+seed_everything: true
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 16
+  logger: null
+  callbacks: null
+  fast_dev_run: false
+  max_epochs: 200
+model:
+  loss_func: mse
+  scheduler_timesteps: 1000
+data:
+  data_dir: /fastscratch/korte/es_dataset
+  batch_size: 32
+ckpt_path: null
