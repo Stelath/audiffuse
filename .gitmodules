@@ -1,0 +1,3 @@
+[submodule "CLAP"]
+	path = CLAP
+	url = https://github.com/Stelath/CLAP.git
