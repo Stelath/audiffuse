@@ -1,9 +1,9 @@
 # lightning.pytorch==2.0.6
 seed_everything: true
 trainer:
-  accelerator: auto
-  strategy: auto
-  devices: auto
+  accelerator: gpu
+  strategy: 'deepspeed_stage_1'
+  devices: 1
   num_nodes: 1
   precision: 16
   logger: null
@@ -15,5 +15,5 @@ model:
   scheduler_timesteps: 1000
 data:
   data_dir: /fastscratch/korte/es_dataset
-  batch_size: 32
+  batch_size: 2
 ckpt_path: null
