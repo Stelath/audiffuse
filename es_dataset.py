@@ -4,7 +4,7 @@ import pandas as pd
 from PIL import Image
 
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 from torchvision import transforms
 import lightning.pytorch as pl
 
@@ -29,7 +29,7 @@ class EpidemicSoundDataset(Dataset):
         self.audio_cfg = audio_cfg
 
         self.transform = transforms.Compose([
-            transforms.Resize((512, 512)),
+            transforms.Resize((512, 512), antialias=True),
             transforms.ToTensor(),
         ])
 
@@ -72,29 +72,40 @@ class EpidemicSoundDataset(Dataset):
 
 
 class EpidemicSoundDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, batch_size: int = 32, test_images: int = 16, percent_val: float = 0.025):
+    def __init__(self, data_dir: str, batch_size: int = 32, num_workers_train: int = 0, num_workers_val: int = 0, num_workers_val_gen: int = 0, val_gen_images: int = 16, percent_val: float = 0.025, clip_samples: int = 0):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
+        self.num_workers_train = num_workers_train
+        self.num_workers_val = num_workers_val
+        self.num_workers_val_gen = num_workers_val_gen
 
-        self.test_images = test_images
+        self.val_gen_images = val_gen_images
         self.percent_val = percent_val
 
+        self.clip_samples = clip_samples
+
     def setup(self, stage: str):
-        self.dataset = EpidemicSoundDataset(self.data_dir)
+        self.dataset_lg = EpidemicSoundDataset(self.data_dir)
+
+        if self.clip_samples > 0:
+            indices = range(self.clip_samples)
+            self.dataset = Subset(self.dataset_lg, indices)
+        else:
+            self.dataset = self.dataset_lg
 
         val_images = round(len(self.dataset) * self.percent_val)
-        test_images = self.test_images
-        train_images = len(self.dataset) - val_images - test_images
+        val_gen_images = self.val_gen_images
+        train_images = len(self.dataset) - val_images - val_gen_images
 
         static_generator = torch.Generator().manual_seed(42)
-        self.es_train, self.es_val, self.es_test = random_split(self.dataset, [train_images, val_images, test_images], generator=static_generator)
+        self.es_train, self.es_val, self.es_val_gen_imgs = random_split(self.dataset, [train_images, val_images, val_gen_images], generator=static_generator)
 
     def train_dataloader(self):
-        return DataLoader(self.es_train, batch_size=self.batch_size)
+        return DataLoader(self.es_train, batch_size=self.batch_size, num_workers=self.num_workers_train)
     
     def val_dataloader(self):
-        return DataLoader(self.es_val, shuffle=False, batch_size=self.batch_size)
+        return [DataLoader(self.es_val, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val), DataLoader(self.es_val_gen_imgs, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val_gen)]
 
     def test_dataloader(self):
         return DataLoader(self.es_test, batch_size=self.batch_size)

@@ -9,12 +9,6 @@ from lightning.pytorch.cli import LightningCLI
 from audiffuse import Audiffuse
 from es_dataset import EpidemicSoundDataset, EpidemicSoundDataModule
 
-# main.py
-
-
-# simple demo classes for your convenience
-from lightning.pytorch.demos.boring_classes import DemoModel, BoringDataModule
-
 
 def cli_main():
     cli = LightningCLI(Audiffuse, EpidemicSoundDataModule, seed_everything_default=42)

@@ -1,19 +1,43 @@
 # lightning.pytorch==2.0.6
 seed_everything: true
 trainer:
-  accelerator: gpu
-  strategy: 'deepspeed_stage_1'
-  devices: 1
+  accelerator: 'gpu'
+  strategy: 'deepspeed_stage_2'
+  devices: auto
   num_nodes: 1
   precision: 16
-  logger: null
-  callbacks: null
+  log_every_n_steps: 10
+  # val_check_interval: 0.5
+  check_val_every_n_epoch: 5
+  default_root_dir: '/scratch/korte/audiffuse'
+  callbacks:
+      class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: -1
+        monitor: 'val/loss'
+        mode: 'min'
+        filename: 'diffuser-{epoch:03d}-{val/loss:.2f}'
+        every_n_epochs: 5
+        save_last: true
+  # gradient_clip_val: 1.0
   fast_dev_run: false
-  max_epochs: 200
+  max_epochs: 500
 model:
+  first_stage_ckpt: "/scratch/korte/audiffuse/autoencoder_ckpt"
+  cond_stage_ckpt: '/scratch/korte/audiffuse/clap.ckpt'
+  freeze_cond_stage: false
   loss_func: mse
-  scheduler_timesteps: 1000
+  noise_scheduler_timesteps: 1000
+  use_lr_scheduler: false
+  val_gen_freq: 1
+  scale_by_std: false
+  scale_factor: 0.1857
 data:
-  data_dir: /fastscratch/korte/es_dataset
-  batch_size: 2
-ckpt_path: null
+  data_dir: '/fastscratch/korte/es-dataset'
+  batch_size: 32
+  num_workers_train: 32
+  num_workers_val: 4
+  num_workers_val_gen: 4
+  clip_samples: 0
+  val_gen_images: 16
+ckpt_path: null #/scratch/korte/audiffuse/lightning_logs/version_0/checkpoints/diffuser-epoch=062-val/loss=0.19.ckpt/

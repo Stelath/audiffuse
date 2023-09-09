@@ -1,0 +1,12 @@
+#PBS -N Audiffuse
+#PBS -l select=1:ncpus=4:mem=16gb,walltime=3:00:00
+
+eval "$(micromamba shell hook --shell=bash)"
+micromamba activate ml
+
+cd /fastscratch/korte/
+
+wget https://storage.googleapis.com/es-dataset/es-dataset.tar
+tar -xzf es-dataset.tar
+
+echo Done!
