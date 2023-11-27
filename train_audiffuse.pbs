@@ -1,6 +1,8 @@
 #PBS -N Audiffuse
 #PBS -l select=1:ncpus=128:mem=712gb:ngpus=8:gpu_model=dgxa100:phase=24a,walltime=48:00:00
 
+# -l select=1:ncpus=128:mem=712gb:ngpus=8:gpu_model=dgxa100:phase=24a,walltime=48:00:00
+
 # -l select=1:ncpus=40:mem=500gb:ngpus=8:gpu_model=dgx1:phase=24b,walltime=48:00:00
 
 eval "$(micromamba shell hook --shell=bash)"
