@@ -1,17 +1,14 @@
 #PBS -N Audiffuse
-#PBS -l select=1:ncpus=128:mem=712gb:ngpus=8:gpu_model=dgxa100:phase=24a,walltime=48:00:00
+#PBS -l select=1:ncpus=40:mem=500gb:ngpus=8:gpu_model=dgx1:phase=24b,walltime=48:00:00
 
 # -l select=1:ncpus=128:mem=712gb:ngpus=8:gpu_model=dgxa100:phase=24a,walltime=48:00:00
 
 # -l select=1:ncpus=40:mem=500gb:ngpus=8:gpu_model=dgx1:phase=24b,walltime=48:00:00
 
-eval "$(micromamba shell hook --shell=bash)"
-micromamba activate ml
-
-module load cuda/12.0.1-gcc/9.5.0
-
 cd /home/korte/projects/audifuse/
 
-python main.py fit --config configs/audiffuse_default.yaml 
+APPTAINER_PATH="/zfs/ailab/Tools/bin:$PATH"
+
+apptainer run --nv --env "PATH=$APPTAINER_PATH" -B /zfs/ailab:/zfs/ailab -B /zfs/ailab/Tools/micromamba:$HOME/micromamba -B $TMPDIR:$TMPDIR -B /scratch/$USER:/scratch/$USER -B /fastscratch/$USER:/fastscratch/$USER /zfs/ailab/Tools/ubuntu.sif bash /home/korte/projects/audifuse/train_audiffuse.sh
 
 echo Done!
