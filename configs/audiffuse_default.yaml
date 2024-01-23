@@ -19,24 +19,25 @@ trainer:
         filename: 'diffuser-{epoch:03d}-{val/loss:.2f}'
         every_n_epochs: 5
         save_last: true
-  # gradient_clip_val: 1.0
+  gradient_clip_val: 1.0
   fast_dev_run: false
   max_epochs: 1000
 model:
-  unet_ckpt: "/scratch/korte/audiffuse/sd_unet_ckpt"
+  diffuser_config: Null
   first_stage_ckpt: '/scratch/korte/audiffuse/sd14_ae_ckpt' #"/scratch/korte/audiffuse/autoencoder_ckpt"
-  cond_stage_ckpt: '/scratch/korte/audiffuse/clap.ckpt'
+  cond_stage_ckpt: 'm-a-p/MERT-v1-95M'
   freeze_cond_stage: true
   loss_func: mse
   noise_scheduler_timesteps: 1000
   use_lr_scheduler: false
+  lr: 1e-4
   val_gen_freq: 1
 data:
   data_dir: '/fastscratch/korte/es-dataset'
-  batch_size: 32
-  num_workers_train: 20
+  batch_size: 4
+  num_workers_train: 32
   num_workers_val: 4
   num_workers_val_gen: 2
   clip_samples: 0
-  val_gen_images: 16
-ckpt_path: /scratch/korte/audiffuse/lightning_logs/version_13/checkpoints/last.ckpt/
+  val_gen_images: 4
+ckpt_path: 
