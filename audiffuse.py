@@ -16,8 +16,9 @@ from torch.distributed.fsdp.wrap import wrap
 from deepspeed.ops.adam import FusedAdam, DeepSpeedCPUAdam
 
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler, PNDMScheduler
-from laion_clap.clap_module.htsat import create_htsat_model
-from laion_clap.clap_module.model import CLAPAudioCfp
+from transformers import AutoModel
+# from laion_clap.clap_module.htsat import create_htsat_model
+# from laion_clap.clap_module.model import CLAPAudioCfp
 
 @dataclass
 class DiffuserConfig:
@@ -26,12 +27,13 @@ class DiffuserConfig:
     out_channels=4
     layers_per_block=2
     block_out_channels=(320, 640, 1280, 1280)
+    # block_out_channels=(64, 128, 256, 256)
     down_block_types = ('CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'DownBlock2D')
     up_block_types = ('UpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D')
     cross_attention_dim=768
 
 class Audiffuse(pl.LightningModule):
-    def __init__(self, unet_ckpt: str, first_stage_ckpt: str, cond_stage_ckpt: str, diffuser_config: DiffuserConfig = DiffuserConfig(), lr: float = 1e-4, use_lr_scheduler: bool = True, loss_func: str = 'mse', noise_scheduler_timesteps: int = 1000, val_gen_freq: int = 5, freeze_cond_stage: bool = True):
+    def __init__(self, first_stage_ckpt: str, cond_stage_ckpt: str, diffuser_config: DiffuserConfig = DiffuserConfig(), lr: float = 1e-4, use_lr_scheduler: bool = False, loss_func: str = 'mse', noise_scheduler_timesteps: int = 1000, val_gen_freq: int = 5, freeze_cond_stage: bool = True):
         super().__init__()
         self.save_hyperparameters()
 
@@ -43,7 +45,7 @@ class Audiffuse(pl.LightningModule):
         self.instantiate_cond_stage(cond_stage_ckpt)
 
         self.diffuser_config = diffuser_config
-        self.instantiate_diffuser(self.diffuser_config, unet_ckpt)
+        self.instantiate_diffuser(self.diffuser_config)
 
         self.noise_scheduler = DDPMScheduler(
             beta_end = 0.012,
@@ -77,13 +79,7 @@ class Audiffuse(pl.LightningModule):
             param.requires_grad = False
 
     def instantiate_cond_stage(self, cond_stage_ckpt):
-        audio_cfg = CLAPAudioCfp(model_type='HTSAT', model_name='tiny', sample_rate=48000, audio_length=1024, window_size=1024, hop_size=480, fmin=50, fmax=14000, class_num=527, mel_bins=64, clip_samples=480000)
-        model = create_htsat_model(audio_cfg, enable_fusion=True, fusion_type='aff_2d')
-        
-        if cond_stage_ckpt is not None:
-            model.load_state_dict(torch.load(cond_stage_ckpt, map_location=torch.device('cpu')))
-        elif cond_stage_ckpt is None and self.freeze_cond_stage:
-            raise ValueError("Cannot freeze cond_stage if cond_stage_ckpt is None")
+        model = AutoModel.from_pretrained(cond_stage_ckpt, trust_remote_code=True)
 
         self.cond_stage_model = model
 
@@ -94,10 +90,8 @@ class Audiffuse(pl.LightningModule):
         else:
             self.cond_stage_model.train()
     
-    def instantiate_diffuser(self, diffuser_config = None, unet_ckpt = None):
-        if unet_ckpt is not None:
-            model = UNet2DConditionModel.from_pretrained(unet_ckpt)
-        elif diffuser_config is not None:
+    def instantiate_diffuser(self, diffuser_config = None):
+        if diffuser_config is not None:
             model = UNet2DConditionModel(
                 sample_size=diffuser_config.sample_size,
                 in_channels=diffuser_config.in_channels,
@@ -109,7 +103,8 @@ class Audiffuse(pl.LightningModule):
                 cross_attention_dim=diffuser_config.cross_attention_dim
             )
         else:
-            raise ValueError("Must provide either unet_ckpt or diffuser_config")
+            model = UNet2DConditionModel.from_pretrained('/scratch/korte/audiffuse/sd_unet_ckpt', trust_remote_code=True)
+            # raise ValueError("Must provide either unet_ckpt or diffuser_config")
 
         self.diffuser_model = model
 
@@ -129,13 +124,18 @@ class Audiffuse(pl.LightningModule):
     def decode_latents(self, latents):
         return self.first_stage_model.decode((1 / self.scale_factor) * latents).sample
     
+    @torch.no_grad()
     def encode_audio(self, audio):
-        audio_embeds = self.cond_stage_model(audio, device=audio['waveform'].device)["fine_grained_embedding"]
+        out = self.cond_stage_model(**audio, output_hidden_states=True)
         
-        audio_embeds_avg_pool = F.avg_pool1d(audio_embeds.permute(0, 2, 1), kernel_size=4, padding=1).permute(0, 2, 1)
-        audio_embeds_max_pool = F.max_pool1d(audio_embeds.permute(0, 2, 1), kernel_size=4, padding=1).permute(0, 2, 1)
+        audio_embeds = torch.stack(out.hidden_states).squeeze()
 
-        audio_embeds = audio_embeds_avg_pool + audio_embeds_max_pool
+        # Still include batch if batch size is 1
+        if audio_embeds.ndim == 3:
+            audio_embeds = audio_embeds.unsqueeze(1)
+        
+        # Reduce the representation in time
+        audio_embeds = audio_embeds.mean(-2).permute(1, 0, 2)
 
         return audio_embeds
     
@@ -145,9 +145,6 @@ class Audiffuse(pl.LightningModule):
     def step(self, batch, batch_idx):
         pdt = torch.float16 if self.trainer.precision == '16-mixed' else torch.float32
         images, audio = batch['album_art'], batch['audio']
-
-        audio['waveform'] = audio['waveform'].to(pdt)
-        audio['mel_fusion'] = audio['mel_fusion'].to(pdt)
 
         # Encode images
         latents = self.encode_images(images, sample=True, scale=True).to(pdt)
@@ -166,6 +163,15 @@ class Audiffuse(pl.LightningModule):
         pred_noise = self(noisy_latents, timesteps, encoded_audio, return_dict=True)[0]
         
         loss = self.loss_func(pred_noise, noise)
+        
+        # print("NANs In Input:", torch.isnan(noisy_latents).sum().item())
+        # print("NOISE:", noise.mean().item(), noise.std().item())
+        # print("NANs In NOISE:", torch.isnan(noise).sum().item())
+        # print("PRED NOISE:", pred_noise.mean().item(), pred_noise.std().item())
+        # print("NANs In PRED NOISE:", torch.isnan(pred_noise).sum().item())
+        # print("LATENTS:", latents.mean().item(), latents.std().item())
+        # print("NOISY LATENTS:", noisy_latents.mean().item(), noisy_latents.std().item())
+        # print("LOSS:", loss.item())
 
         # Ensure all GPU operations are completed before the next iteration
         # torch.cuda.synchronize()
@@ -220,8 +226,6 @@ class Audiffuse(pl.LightningModule):
         images, audio = batch['album_art'], batch['audio']
 
         pdt = torch.float16 if self.trainer.precision == '16-mixed' else torch.float32
-        audio['waveform'] = audio['waveform'].to(pdt)
-        audio['mel_fusion'] = audio['mel_fusion'].to(pdt)
 
         static_generator = torch.Generator()
         static_generator.manual_seed(42 * self.global_rank)
