@@ -6,32 +6,29 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader, Subset, random_split
 from torchvision import transforms
+
+import torchaudio
+import torchaudio.transforms as T
+
 import lightning.pytorch as pl
+from lightning.pytorch.utilities import CombinedLoader
 
-from laion_clap.training.data import get_audio_features, int16_to_float32, float32_to_int16
-
-DEFAULT_AUDIO_CFG = {'audio_length': 1024,
-                    'clip_samples': 480000,
-                    'mel_bins': 64,
-                    'sample_rate': 48000,
-                    'window_size': 1024,
-                    'hop_size': 480,
-                    'fmin': 50,
-                    'fmax': 14000,
-                    'class_num': 527,
-                    'model_type': 'HTSAT',
-                    'model_name': 'tiny'}
+from transformers import Wav2Vec2FeatureExtractor
 
 class EpidemicSoundDataset(Dataset):
-    def __init__(self, dataset: str, audio_cfg: map=DEFAULT_AUDIO_CFG):
+    def __init__(self, dataset: str, max_audio_length: int = 120):#180
         self.dataset = dataset
         self.metadata = pd.read_parquet(os.path.join(dataset, 'metadata.parquet'))
-        self.audio_cfg = audio_cfg
+        self.audio_processor = Wav2Vec2FeatureExtractor.from_pretrained("m-a-p/MERT-v1-95M", trust_remote_code=True)
+        self.max_audio_length = max_audio_length * self.audio_processor.sampling_rate
 
         self.transform = transforms.Compose([
             transforms.Resize((512, 512), antialias=True),
             transforms.ToTensor(),
         ])
+        
+        with open(os.path.join(dataset, "songs_npy", "sample_rate.txt"), "r") as file:
+            self.sample_rate = int(file.read())
 
     def __len__(self):
         return len(self.metadata)
@@ -44,11 +41,11 @@ class EpidemicSoundDataset(Dataset):
         album_art = self.transform(album_art) * 2 - 1 # Convert image to tensor and set range of image from -1 to 1
 
         audio = np.load(os.path.join(self.dataset, 'songs_npy', f'{song_id}.npy'))
-        audio = self.process_audio(audio)
+        audio = self.process_audio(audio, self.sample_rate)
 
         return {'album_art': album_art, 'audio': audio}
 
-    def process_audio(self, audio):
+    def process_audio(self, audio, sampling_rate):
         """Generate Mel-spectrogram from Audio WaveForm
 
         Parameters
@@ -56,19 +53,18 @@ class EpidemicSoundDataset(Dataset):
         audio: np.ndarray
             Audio WaveForm
         """
-        audio_waveform = int16_to_float32(float32_to_int16(audio))
-        audio_waveform = torch.from_numpy(audio_waveform).float()
-
-        audio_dict = {}
-        audio_dict = get_audio_features(
-            audio_dict, audio_waveform, 480000, 
-            data_truncating='fusion', 
-            data_filling='repeatpad',
-            audio_cfg=self.audio_cfg,
-            require_grad=False
-        )
-
-        return audio_dict
+        
+        resample_rate = self.audio_processor.sampling_rate
+        
+        if resample_rate != sampling_rate:
+            resampler = T.Resample(sampling_rate, resample_rate)
+            audio = resampler(audio)
+        
+        processed_audio = self.audio_processor(audio, sampling_rate=resample_rate, return_tensors="pt", padding='max_length', max_length=self.max_audio_length, truncation=True)
+        
+        processed_audio['input_values'] = processed_audio['input_values'][0]
+        
+        return processed_audio
 
 
 class EpidemicSoundDataModule(pl.LightningDataModule):
@@ -105,7 +101,10 @@ class EpidemicSoundDataModule(pl.LightningDataModule):
         return DataLoader(self.es_train, batch_size=self.batch_size, num_workers=self.num_workers_train)
     
     def val_dataloader(self):
-        return [DataLoader(self.es_val, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val), DataLoader(self.es_val_gen_imgs, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val_gen)]
+        iterables = {'main_val': DataLoader(self.es_val, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val), 'img_val': DataLoader(self.es_val_gen_imgs, shuffle=False, batch_size=self.batch_size, num_workers=self.num_workers_val_gen)}
+        combined_loader = CombinedLoader(iterables, mode='sequential')
+        _ = iter(combined_loader)
+        return combined_loader
 
     def test_dataloader(self):
         return DataLoader(self.es_test, batch_size=self.batch_size)
