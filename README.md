@@ -26,6 +26,9 @@ While obviously music is very subjective, there are some hints here tha tthe mod
 
 Here is another example of the model picking up on cues in the song, as both the original and some of the generated images have a very urban feel to them. With the top right literally being a brick wall, and the bottom left one appearing to contain at least the pattern of an automobile. Though these dont appear to have the same fidelity as the images generated from the bluesouth song they do illustrate the models ability to derive some meaning from the music.
 
+## Interesting Notes
+We fine tuned on the UNet of Stable Diffusion v1.4 along with using the corrisponding autoencoder. Despite the conditional head being completely different, this suprisingly helped us produce less abstract results than training the UNet from scratch.
+
 ## TODO
 - [ ] Release Weights
 - [ ] Release How To
